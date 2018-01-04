@@ -8,6 +8,7 @@ Some examples:
 
     * Get-ServiceGroup -sgname 'web-login' | Set-ServiceGroupSDT -comment "down for maintenance" -hours 2
     * Get-LMDeviceGroup -GroupName Exchange | Where fullpath -eq '1. Application/Exchange' | Set-DeviceGroupSDT -comment "Exchange Monthly Reboot"
+    * Get-LMDeviceGroup * | select name, fullpath, id | Where-Object fullpath -like "1. Application*" | Out-GridView -PassThru  | % { Set-DeviceGroupSDT -Id $_.Id -FullPath $_.fullpath }
 
 * Alert handling:
 
