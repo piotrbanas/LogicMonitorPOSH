@@ -22,7 +22,7 @@ Contact: piotrbanas@xper.pl
 #>
 Param (
     [string]$resourcePath = '/service/services',
-    [ValidateSet('GET','POST', 'DELETE')]
+    [ValidateSet('GET','POST', 'DELETE', 'PUT')]
     [string]$httpVerb = 'GET',
     [string]$data
 )
@@ -30,8 +30,12 @@ Param (
 $accessId = "$($MyInvocation.MyCommand.Module.PrivateData.accessId)"
 $accessKey = "$($MyInvocation.MyCommand.Module.PrivateData.accessKey)"
 $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+
 # Construct URL #
 $url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
+
+# Force TLS version 
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # Get current time in milliseconds
 $epoch = [Math]::Round((New-TimeSpan -start (Get-Date -Date "1/1/1970") -end (Get-Date).ToUniversalTime()).TotalMilliseconds)
@@ -72,6 +76,7 @@ Param (
 $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
 $resourcePath = '/service/services'
 $url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
+
 $headers = New-Headers -resourcePath $resourcePath -httpVerb 'GET'
 
 $response = Invoke-RestMethod -Uri $url -Method Get -Header $headers 
@@ -128,7 +133,7 @@ Function Get-LMDeviceGroup  {
     .PARAMETER GroupName
     Name of the device group
     .EXAMPLE
-    Get-LMDeviceGroup -GroupName 'Exchange' | Where fullpath -eq '1. Application/Exchange'
+    Get-LMDeviceGroup -GroupName 'SQL' | Where fullpath -eq '1. Application/SQL'
     .EXAMPLE
     .EXAMPLE
     #>
@@ -185,6 +190,41 @@ $body = $response.data
 $body.items 
 }
 
+Function Get-DeviceAlertsCleared {
+<#
+.Synopsis
+Get LogicMonitor Cleared Device Alerts
+.DESCRIPTION
+Function retrieves cleared alerts for a given device
+.PARAMETER id
+LM device id
+.EXAMPLE
+Get-DeviceAlerts -id 33
+.EXAMPLE
+Get-LMDevice -computername '*SQL*' | Get-DeviceAlertsCleared
+#>
+[Cmdletbinding()]
+Param (
+    [Parameter(ValueFromPipelineByPropertyName=$True, Mandatory=$True)]
+    [ValidateNotNullOrEmpty()]
+    [int]$id
+)
+$LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+$resourcePath = "/device/devices/$id/alerts"
+$filter = "?filter=cleared~"
+$url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath + $filter
+$headers = New-Headers -resourcePath $resourcePath -httpVerb 'GET'
+
+$response = Invoke-RestMethod -Uri $url -Method Get -Header $headers 
+If ($response.status -ne 200) {
+    $response.errmsg
+}
+Else {
+    $body = $response.data
+    $body.items 
+}
+}
+
 Function Get-SvcAlertDetails {
 <#
 .Synopsis
@@ -209,8 +249,8 @@ Param (
     [int[]]$id
 )
 BEGIN {
-$LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
-}
+    $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+    }
 PROCESS {
     $resourcePath = "/service/services/$id/alerts"
     $url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
@@ -247,7 +287,7 @@ Param (
     [string]$comment = "Alert acknowledged by Orchestrator"
 )
 BEGIN {
-$LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+    $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
 }
 PROCESS {
 $resourcePath = "/alert/alerts/$internalId/ack"
@@ -357,6 +397,7 @@ Param (
     [string]$comment = "ServiceGroup down for maintenance",
     [int]$hours = 1
 )
+
 $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
 $resourcePath = '/sdt/sdts'
 $url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
@@ -414,6 +455,7 @@ Function Set-DeviceGroupSDT {
         [string]$comment = "Device Group down for maintenance",
         [int]$hours = 1
     )
+    
     $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"    
     $resourcePath = '/sdt/sdts'
     $url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
@@ -440,7 +482,6 @@ $data = @"
     $response.errmsg
 
 }
-
 Function Set-DeviceSDT {
 <#
 .Synopsis
@@ -499,6 +540,76 @@ $response = Invoke-RestMethod -Uri $url -Method POST -Header $headers -Body $dat
 $response.errmsg
 }
 
+Function Set-DeviceSDTtime {
+<#
+.Synopsis
+Set Device SDT
+.DESCRIPTION
+Sets Scheduled Down Time for a given device in LogicMonitor.
+.PARAMETER id
+Id of the device
+.PARAMETER name
+Name of the device
+.PARAMETER comment
+Comment to attach to SDT
+.PARAMETER timeType
+Hours or minutes
+.PARAMETER timeValue
+Number of hours or minutes that the SDT will be in effect
+.EXAMPLE
+Set-DeviceSDTtime -id 23 -name 'hostname1' -comment "down for maintenance" -timeType Minutes -timeValue 30 
+.EXAMPLE
+Get-LMDevice -computername 'hostname1' | Set-DeviceSDTTime -comment "down for maintenance"
+.OUTPUTS
+System.String (errmsg)
+.NOTES
+Contact: piotrbanas@xper.pl
+#>
+
+[Cmdletbinding()]
+Param (
+    [Parameter(ValueFromPipelineByPropertyName=$True, Mandatory=$True)]
+    [ValidateNotNullOrEmpty()]
+    [int]$Id,
+    [Parameter(ValueFromPipelineByPropertyName=$True, Mandatory=$True)]
+    [ValidateNotNullOrEmpty()]
+    [string]$DisplayName,
+    [string]$comment = "Device down for maintenance. SDT added by $env:USERNAME",
+    [ValidateSet('Hours','Minutes','Days')]
+    [string]$timeType = 'Hours',
+    [int]$timeValue = 2
+)
+$LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+$resourcePath = '/sdt/sdts'
+$url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
+$startDateTime = [Math]::Round((New-TimeSpan -start (Get-Date -Date "1/1/1970") -end (Get-Date).ToUniversalTime()).TotalMilliseconds)
+If ($timeType -eq 'Hours') {
+    $endDateTime = [Math]::Round((New-TimeSpan -start (Get-Date -Date "1/1/1970") -end ((Get-Date).AddHours($timeValue)).ToUniversalTime()).TotalMilliseconds)
+}
+Elseif ($timeType -eq 'Minutes') {
+    $endDateTime = [Math]::Round((New-TimeSpan -start (Get-Date -Date "1/1/1970") -end ((Get-Date).AddMinutes($timeValue)).ToUniversalTime()).TotalMilliseconds)
+}
+Else {
+    $endDateTime = [Math]::Round((New-TimeSpan -start (Get-Date -Date "1/1/1970") -end ((Get-Date).AddDays($timeValue)).ToUniversalTime()).TotalMilliseconds)
+}
+
+$data = @"
+{"comment":"$comment",
+"sdtType":1,
+"type":"DeviceSDT",
+"DeviceId":612,
+"deviceDisplayName":"$displayname",
+"startDateTime":"$startDateTime",
+"endDateTime":"$endDateTime"
+}
+"@
+
+$headers = New-Headers -resourcePath $resourcePath -httpVerb 'POST' -data $data
+
+$response = Invoke-RestMethod -Uri $url -Method POST -Header $headers -Body $data
+$response.errmsg
+}
+
 Function Get-ActiveSDT {
 <#
 .Synopsis
@@ -506,7 +617,7 @@ Get LogicMonitor SDT
 .DESCRIPTION
 Retrieve active Scheduled Down Times
 .EXAMPLE
-Get-ActiveSDT | Where-Object ServiceGroupName -eq 'web-login' | Delete-SDT
+Get-ActiveSDT | Where-Object ServiceGroupName -eq 'web-login' | Remove-SDT
 #>
 $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
 $resourcePath = '/sdt/sdts'
@@ -525,7 +636,7 @@ Remove Scheduled Down Time
 .PARAMETER Id
 Id of LogicMonitor SDT
 .EXAMPLE
-Get-ActiveSDT | Where-Object ServiceGroupName -eq 'web-login' | Delete-SDT
+Get-ActiveSDT | Where-Object ServiceGroupName -eq 'web-login' | Remove-SDT
 #>
 [Cmdletbinding()]
 Param (
@@ -534,7 +645,7 @@ Param (
     [string[]]$Id
 )
 BEGIN {
-$LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+    $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
 }
 PROCESS {
     $resourcePath = "/sdt/sdts/$id"
@@ -543,5 +654,111 @@ PROCESS {
 
     $response = Invoke-RestMethod -Uri $url -Method Delete -Header $headers
     $response.errmsg
+}
+}
+
+Function Find-LMDashboard  {
+#
+[CmdletBinding()]
+Param (
+    [Parameter()]
+    [string]$name = 'TEXTWIDGET'
+)
+BEGIN {
+    $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+    $resourcePath = '/dashboard/dashboards'
+    #$resourcePath = '/dashboard/groups'
+}
+PROCESS {
+    $filter = "?filter=name~$name"
+    #$queryparams = '?fields=name,id'
+    $url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath + $filter #+ $queryparams
+    $headers = New-Headers -resourcePath $resourcePath -httpVerb 'GET'
+    
+    $response = Invoke-RestMethod -Uri $url -Method GET -Header $headers
+    $response.data.items
+}
+END {
+
+}
+}
+
+Function Find-LMWidget {
+[Cmdletbinding()]
+Param (
+    [Parameter(ValueFromPipeline)]
+    # Widget ID
+    [string[]]$name = 'TEXT'
+)
+BEGIN {
+    $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+    $resourcePath = "/dashboard/widgets/"
+}
+PROCESS {
+$filter = "?filter=name~$name"
+$url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath + $filter
+$headers = New-Headers -resourcePath $resourcePath -httpVerb 'GET'
+
+$response = Invoke-RestMethod -Uri $url -Method GET -Header $headers
+$response.data.items
+
+}
+
+}
+
+Function Get-LMWidget {
+[Cmdletbinding()]
+Param (
+    [Parameter(ValueFromPipeline)]
+    # Widget ID
+    [int]$id = 722
+)
+BEGIN {
+    $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+}
+PROCESS {
+$resourcePath = "/dashboard/widgets/$id"
+$url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
+$headers = New-Headers -resourcePath $resourcePath -httpVerb 'GET'
+
+$response = Invoke-RestMethod -Uri $url -Method GET -Header $headers
+$response.data
+
+}
+
+}
+
+Function Update-LMTextWidget {
+[Cmdletbinding()]
+Param (
+    [Parameter(Mandatory=$True)]
+    [ValidateNotNullOrEmpty()]
+    [string[]]$content,
+    [Parameter(ValueFromPipeline)]
+    # Widget ID
+    [int]$widgetId = 722,
+    [int]$dashboardId = 141,
+    [string]$widgetName = 'TEXT'
+)
+BEGIN {
+    $LMAccount = "$($MyInvocation.MyCommand.Module.PrivateData.LMAccount)"
+}
+PROCESS {
+$resourcePath = "/dashboard/widgets/$widgetId"
+$url = "https://$LMAccount.logicmonitor.com/santaba/rest" + $resourcePath
+
+$data = [ordered]@{
+'dashboardId' = $dashboardId;
+"content" = "$content"
+'type' = "text";
+"name" = $widgetName;
+}
+
+$json = $data | ConvertTo-Json -Compress
+
+$headers = New-Headers -resourcePath $resourcePath -httpVerb 'PUT' -data $json
+$response = Invoke-RestMethod -Uri $url -Method Put -Header $headers -Body $json
+$response
+
 }
 }
